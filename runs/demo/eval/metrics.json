@@ -1,0 +1,27 @@
+{
+  "accuracy": 0.75,
+  "precision_per_class": [
+    0.5,
+    0.0,
+    1.0,
+    1.0
+  ],
+  "recall_per_class": [
+    1.0,
+    0.0,
+    1.0,
+    1.0
+  ],
+  "f1_per_class": [
+    0.6666666666666666,
+    0.0,
+    1.0,
+    1.0
+  ],
+  "classes": [
+    "Healthy",
+    "Bearing",
+    "BrokenRotorBar",
+    "StatorShort"
+  ]
+}

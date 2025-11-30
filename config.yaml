@@ -1,0 +1,28 @@
+defaults:
+  window_length: 3000
+  hop_length: 1500
+  batch_size: 32
+  epochs: 30
+  lr: 1e-3
+  seed: 42
+  num_workers: 4
+  classes: [Healthy, Bearing, BrokenRotorBar, StatorShort]
+  use_gpu: true
+  save_dir: runs/exp1
+  scheduler: plateau
+  plateau_patience: 5
+  early_stop_patience: 10
+  mixed_precision: false
+  oversample: false
+  prefer_voltage: false
+  include_aux: false
+  scaling_type: zscore
+  dropout: 0.5
+  base_channels: 64
+  augment:
+    enabled: true
+    noise: true
+    noise_snr_db: 30
+    scale: true
+    time_shift: true
+    freq_aug: false
