@@ -7,7 +7,6 @@ from typing import Dict
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
@@ -57,6 +56,10 @@ class Augmentor:
         return x
 
 
+# NOTE: previous version returned a local function which caused pickling errors on Windows.
+# Using a top-level callable class (Augmentor) ensures picklability across processes.
+
+
 class Trainer:
     def __init__(self, cfg: Dict, data_path: str):
         self.cfg = cfg
@@ -72,6 +75,7 @@ class Trainer:
         augment_fn = None
         if cfg.get("augment", {}).get("enabled", False):
             augment_cfg = cfg["augment"]
+            # instantiate top-level Augmentor (picklable)
             augment_fn = Augmentor(augment_cfg)
 
         ds_train, ds_val, ds_test = create_datasets(
@@ -108,26 +112,15 @@ class Trainer:
         sample = ds_train[0]
         x_sample = sample[0] if isinstance(sample, tuple) else sample
         in_ch = int(x_sample.shape[0])
-        self.model = create_model({
-            'in_channels': in_ch,
-            'num_classes': len(classes),
-            'dropout': cfg.get('dropout', 0.5),
-            'base_channels': cfg.get('base_channels', 64),
-            'severity_head': cfg.get('severity_head', False),
-            'severity_classes': cfg.get('severity_classes', 6)
-        })
+        self.model = create_model({'in_channels': in_ch, 'num_classes': len(classes), 'dropout': cfg.get('dropout', 0.5), 'base_channels': cfg.get('base_channels', 64), 'severity_head': cfg.get('severity_head', False), 'severity_classes': cfg.get('severity_classes', 6)})
         self.model.to(self.device)
 
         class_weights = None
         if cfg.get('class_weights', None):
             class_weights = torch.tensor(cfg['class_weights'], dtype=torch.float32, device=self.device)
         self.criterion = nn.CrossEntropyLoss(weight=class_weights)
-
-        # Severity head: we will support classification (CrossEntropy) and regression (SmoothL1)
-        self.use_severity = cfg.get('severity_head', False)
-        self.severity_loss_cls = nn.CrossEntropyLoss(ignore_index=-100)  # for classification-style severity outputs
-        self.severity_loss_reg = nn.SmoothL1Loss(reduction='mean')      # for regression-style severity outputs
-
+        # Optional severity loss (classification 0..6)
+        self.severity_loss = nn.CrossEntropyLoss(ignore_index=-100) if cfg.get('severity_head', False) else None
         lr_value = cfg.get('lr', 1e-3)
         try:
             lr_value = float(lr_value)
@@ -144,12 +137,8 @@ class Trainer:
         else:
             self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'max', patience=cfg.get('plateau_patience', 5))
 
-        # AMP: allocate scaler only if needed, and use the recommended API
         self.use_amp = cfg.get('mixed_precision', False) and self.device.type == 'cuda'
-        if self.use_amp:
-            self.scaler = torch.amp.GradScaler(device_type="cuda", enabled=True)
-        else:
-            self.scaler = None
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp) if self.use_amp else torch.amp.GradScaler('cpu', enabled=False)
 
         self.tb_writer = None
         if cfg.get('tensorboard', False):
@@ -165,7 +154,7 @@ class Trainer:
             ckpt = torch.load(resume_path, map_location=self.device)
             self.model.load_state_dict(ckpt['model_state'])
             self.optimizer.load_state_dict(ckpt['optimizer'])
-            if 'scaler' in ckpt and self.use_amp and self.scaler is not None:
+            if 'scaler' in ckpt and self.use_amp:
                 self.scaler.load_state_dict(ckpt['scaler'])
             print(f"Resumed from {resume_path} (epoch {ckpt.get('epoch')})")
 
@@ -179,126 +168,38 @@ class Trainer:
             ys_pred = []
             pbar = tqdm(self.loader_train, desc=f"Train {epoch}/{epochs}")
             for batch in pbar:
-                if not self.use_severity:
+                if self.severity_loss is None:
                     x, y = batch
-                    sev = None
                 else:
                     x, y, sev = batch
-
                 x = x.to(self.device)
                 y = y.to(self.device)
-                if sev is not None:
+                if self.severity_loss is not None:
                     sev = sev.to(self.device)
-
-                # autocast with device type
-                with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
+                with torch.amp.autocast('cuda', enabled=self.use_amp):
                     outputs = self.model(x)
-                    if not self.use_severity:
+                    if self.severity_loss is None:
                         logits = outputs
                         loss = self.criterion(logits, y)
                     else:
-                        # Expect outputs either (logits, sev_logits) or (logits) if model not returning severity
-                        if isinstance(outputs, tuple) and len(outputs) == 2:
-                            logits, sev_logits = outputs
-                        else:
-                            # model did not return severity; treat as regular classification
-                            logits = outputs
-                            sev_logits = None
-
+                        logits, sev_logits = outputs
                         loss_cls = self.criterion(logits, y)
-
-                        # default severity loss term
-                        loss_sev = 0.0
+                        # Map severity: Healthy -> ignore (-100), faults 1..6 -> 0..5
+                        sev_targets = sev.clone()
+                        sev_targets = torch.where(y == self.label_map['Healthy'], torch.full_like(sev_targets, -100), sev_targets)
+                        sev_targets = torch.where(sev_targets > 0, sev_targets - 1, sev_targets)
+                        loss_sev = self.severity_loss(sev_logits, sev_targets)
                         alpha = float(self.cfg.get('severity_loss_weight', 0.3))
-
-                        if sev_logits is not None:
-                            # Determine whether sev_logits are classification logits (C>1) or regression (C==1 or 1-dim)
-                            if sev_logits.dim() == 1 or (sev_logits.dim() == 2 and sev_logits.size(1) == 1):
-                                # regression output (B,) or (B,1)
-                                # ensure sev_targets are floats normalized to [0,1]
-                                if sev.dtype in (torch.long, torch.int):
-                                    # if ints likely 0..6 or 1..6: convert to floats / normalize
-                                    sev_float = sev.to(torch.float32)
-                                    # Heuristic: if max > 1, assume 1..6 and map dividing by 6
-                                    if float(sev_float.max().item()) > 1.0:
-                                        sev_float = sev_float / 6.0
-                                else:
-                                    sev_float = sev.to(torch.float32)
-                                # mask out healthy samples
-                                mask = (y != self.label_map['Healthy'])
-                                if mask.any():
-                                    # squeeze pred if needed
-                                    
-                                    # pred = sev_logits.squeeze()
-                                    # pred_masked = pred[mask]
-                                    # target_masked = sev_float[mask].to(pred_masked.dtype)
-                                    # loss_sev = self.severity_loss_reg(pred_masked, target_masked)
-                                    # reshape to (B,) without dropping batch dimension
-                                    
-                                    pred = sev_logits.reshape(-1)
-
-                                    # apply mask
-                                    pred_masked = pred[mask]
-                                    target_masked = sev_float.reshape(-1)[mask]
-
-                                    if pred_masked.numel() > 0:
-                                        loss_sev = self.severity_loss_reg(pred_masked, target_masked)
-                                    else:
-                                        loss_sev = torch.tensor(0.0, device=self.device)
-                                else:
-                                    loss_sev = 0.0
-                            else:
-                                # classification-style severity head (B, C)
-                                num_sev_classes = sev_logits.size(1)
-                                # Build class targets (integers 0..num_sev_classes-1), with ignore_index for healthy
-                                if sev.dtype in (torch.float32, torch.float16, torch.float64):
-                                    # assume normalized floats in [0,1]. Map to classes by rounding to (num_classes-1)
-                                    sev_float = sev.to(torch.float32)
-                                    # if values appear >1.0 (not normalized), try to rescale by dividing by 6
-                                    if float(sev_float.max().item()) > 1.0:
-                                        sev_float = sev_float / 6.0
-                                    sev_idx = torch.clamp(torch.round(sev_float * (num_sev_classes - 1)).long(), 0, num_sev_classes - 1)
-                                else:
-                                    # integer targets: could be 0..6 or 1..6
-                                    sev_idx = sev.clone().long()
-                                    # if values contain >=(num_sev_classes), assume 1..6 mapping -> subtract 1
-                                    if int(sev_idx.max().item()) >= num_sev_classes:
-                                        # Convert 1..6 -> 0..5
-                                        sev_idx = torch.where(sev_idx > 0, sev_idx - 1, sev_idx)
-                                # ignore healthy (set to -100)
-                                sev_targets = torch.full_like(sev_idx, -100)
-                                mask_fault = (y != self.label_map['Healthy'])
-                                if mask_fault.any():
-                                    sev_targets[mask_fault] = sev_idx[mask_fault]
-                                loss_sev = self.severity_loss_cls(sev_logits, sev_targets)
-                        else:
-                            # no sev_logits returned by model; severity loss = 0
-                            loss_sev = 0.0
-
-                        # total loss
-                        if isinstance(loss_sev, torch.Tensor):
-                            loss = loss_cls + alpha * loss_sev
-                        else:
-                            loss = loss_cls
-
-                # backward + step (handle AMP or not)
+                        loss = loss_cls + alpha * loss_sev
                 self.optimizer.zero_grad()
-                if self.use_amp and self.scaler is not None:
-                    # scale and step
-                    self.scaler.scale(loss).backward()
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                else:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=float(self.cfg.get('grad_clip', 5.0)))
-                    self.optimizer.step()
-
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
                 losses.append(loss.item())
                 preds = logits.argmax(dim=1).detach().cpu().numpy()
                 ys_pred.extend(preds.tolist())
                 ys_true.extend(y.detach().cpu().numpy().tolist())
                 pbar.set_postfix(loss=np.mean(losses), acc=accuracy_score(ys_true, ys_pred))
-
             train_acc = accuracy_score(ys_true, ys_pred)
             train_loss = float(np.mean(losses))
             history['train_loss'].append(train_loss)
@@ -326,7 +227,7 @@ class Trainer:
                 'model_state': self.model.state_dict(),
                 'optimizer': self.optimizer.state_dict(),
                 'cfg': self.cfg,
-                'scaler': self.scaler.state_dict() if (self.use_amp and self.scaler is not None) else None,
+                'scaler': self.scaler.state_dict() if self.use_amp else None,
                 'label_map': self.label_map,
             }
             save_checkpoint(ckpt_state, os.path.join(self.save_dir, f'epoch{epoch}.pth'))
@@ -367,92 +268,29 @@ class Trainer:
         losses = []
         with torch.no_grad():
             for batch in loader:
-                if not self.use_severity:
+                if self.severity_loss is None:
                     x, y = batch
-                    sev = None
                 else:
                     x, y, sev = batch
-
                 x = x.to(self.device)
                 y = y.to(self.device)
-                if sev is not None:
-                    sev = sev.to(self.device)
-
                 outputs = self.model(x)
-                if not self.use_severity:
+                if self.severity_loss is None:
                     logits = outputs
                     loss = self.criterion(logits, y)
                 else:
-                    if isinstance(outputs, tuple) and len(outputs) == 2:
-                        logits, sev_logits = outputs
-                    else:
-                        logits = outputs
-                        sev_logits = None
-
+                    logits, sev_logits = outputs
                     loss_cls = self.criterion(logits, y)
-
-                    loss_sev = 0.0
+                    sev_targets = sev.to(self.device)
+                    sev_targets = torch.where(y == self.label_map['Healthy'], torch.full_like(sev_targets, -100), sev_targets)
+                    sev_targets = torch.where(sev_targets > 0, sev_targets - 1, sev_targets)
+                    loss_sev = self.severity_loss(sev_logits, sev_targets)
                     alpha = float(self.cfg.get('severity_loss_weight', 0.3))
-
-                    if sev_logits is not None:
-                        if sev_logits.dim() == 1 or (sev_logits.dim() == 2 and sev_logits.size(1) == 1):
-                            # regression
-                            if sev.dtype in (torch.long, torch.int):
-                                sev_float = sev.to(torch.float32)
-                                if float(sev_float.max().item()) > 1.0:
-                                    sev_float = sev_float / 6.0
-                            else:
-                                sev_float = sev.to(torch.float32)
-                            mask = (y != self.label_map['Healthy'])
-                            if mask.any():
-                                
-                                # pred = sev_logits.squeeze()
-                                # pred_masked = pred[mask]
-                                # target_masked = sev_float[mask].to(pred_masked.dtype)
-                                # loss_sev = self.severity_loss_reg(pred_masked, target_masked)
-                                # reshape to (B,) without dropping batch dimension
-                                pred = sev_logits.reshape(-1)
-                                
-                                # apply mask
-                                pred_masked = pred[mask]
-                                target_masked = sev_float.reshape(-1)[mask]
-                                
-                                if pred_masked.numel() > 0:
-                                    loss_sev = self.severity_loss_reg(pred_masked, target_masked)
-                                else:
-                                    loss_sev = torch.tensor(0.0, device=self.device)
-                            else:
-                                loss_sev = 0.0
-                        else:
-                            # classification
-                            num_sev_classes = sev_logits.size(1)
-                            if sev.dtype in (torch.float32, torch.float16, torch.float64):
-                                sev_float = sev.to(torch.float32)
-                                if float(sev_float.max().item()) > 1.0:
-                                    sev_float = sev_float / 6.0
-                                sev_idx = torch.clamp(torch.round(sev_float * (num_sev_classes - 1)).long(), 0, num_sev_classes - 1)
-                            else:
-                                sev_idx = sev.clone().long()
-                                if int(sev_idx.max().item()) >= num_sev_classes:
-                                    sev_idx = torch.where(sev_idx > 0, sev_idx - 1, sev_idx)
-                            sev_targets = torch.full_like(sev_idx, -100)
-                            mask_fault = (y != self.label_map['Healthy'])
-                            if mask_fault.any():
-                                sev_targets[mask_fault] = sev_idx[mask_fault]
-                            loss_sev = self.severity_loss_cls(sev_logits, sev_targets)
-                    else:
-                        loss_sev = 0.0
-
-                    if isinstance(loss_sev, torch.Tensor):
-                        loss = loss_cls + alpha * loss_sev
-                    else:
-                        loss = loss_cls
-
+                    loss = loss_cls + alpha * loss_sev
                 losses.append(loss.item())
                 preds = logits.argmax(dim=1).detach().cpu().numpy()
                 ys_pred.extend(preds.tolist())
                 ys_true.extend(y.detach().cpu().numpy().tolist())
-
         acc = accuracy_score(ys_true, ys_pred)
         prec, rec, f1, _ = precision_recall_fscore_support(ys_true, ys_pred, labels=list(range(len(self.label_map))), zero_division=0)
         return {

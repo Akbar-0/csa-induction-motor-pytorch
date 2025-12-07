@@ -24,6 +24,8 @@ def parse_args():
     p.add_argument('--include-aux', action='store_true')
     p.add_argument('--scaling-type', type=str, choices=['zscore','minmax'], default=None)
     p.add_argument('--resume', type=str, default=None)
+    p.add_argument('--severity-head', action='store_true', help='Enable severity prediction head (0..6)')
+    p.add_argument('--severity-loss-weight', type=float, default=None, help='Weight for severity loss')
     return p.parse_args()
 
 
@@ -63,6 +65,10 @@ def main():
         cfg['scaling_type'] = args.scaling_type
     if args.resume:
         cfg['resume_path'] = args.resume
+    if args.severity_head:
+        cfg['severity_head'] = True
+    if args.severity_loss_weight is not None:
+        cfg['severity_loss_weight'] = args.severity_loss_weight
 
     trainer = Trainer(cfg, args.data_csv)
     trainer.fit()

@@ -24,7 +24,7 @@ def main():
     ckpt = torch.load(args.checkpoint, map_location='cpu')
     cfg = ckpt.get('cfg', {})
     classes = cfg.get('classes', ["Healthy", "Bearing", "BrokenRotorBar", "StatorShort"])
-    model = create_model({'in_channels': 3, 'num_classes': len(classes)})
+    model = create_model({'in_channels': 3, 'num_classes': len(classes), 'severity_head': cfg.get('severity_head', False), 'severity_classes': cfg.get('severity_classes', 7)})
     model.load_state_dict(ckpt['model_state'])
     model.eval()
 
@@ -32,19 +32,37 @@ def main():
     loader = torch.utils.data.DataLoader(ds, batch_size=1, collate_fn=collate_fn)
     results = []
     with torch.no_grad():
-        for i, (x, y) in enumerate(loader):
+        for i, batch in enumerate(loader):
+            if cfg.get('severity_head', False):
+                x, y, sev = batch
+            else:
+                x, y = batch
             if args.window_index is not None and i != args.window_index:
                 continue
-            logits = model(x)
+            outputs = model(x)
+            if cfg.get('severity_head', False):
+                logits, sev_logits = outputs
+                sev_probs = torch.softmax(sev_logits, dim=1).cpu().numpy()[0]
+                sev_pred_idx = int(np.argmax(sev_probs))
+                sev_pred = sev_pred_idx + 1  # map back to 1..6
+            else:
+                logits = outputs
+                sev_pred = None
             probs = torch.softmax(logits, dim=1).cpu().numpy()
             topk_idx = np.argsort(-probs, axis=1)[:, :args.topk]
             pred_labels = [[classes[j] for j in row] for row in topk_idx]
             confidences = [probs[bi, row].tolist() for bi, row in enumerate(topk_idx)]
-            results.append({'window': i, 'top_labels': pred_labels[0], 'confidences': confidences[0]})
+            res = {'window': i, 'top_labels': pred_labels[0], 'confidences': confidences[0]}
+            if sev_pred is not None:
+                # Only report severity if top class is not Healthy
+                if pred_labels[0][0].lower() != 'healthy':
+                    res['severity_pred'] = sev_pred
+            results.append(res)
             if args.window_index is not None:
                 break
     for r in results:
-        print(f"Window {r['window']}: {list(zip(r['top_labels'], [f'{c:.3f}' for c in r['confidences']]))}")
+        sev_txt = f", severity={r['severity_pred']}" if 'severity_pred' in r else ''
+        print(f"Window {r['window']}: {list(zip(r['top_labels'], [f'{c:.3f}' for c in r['confidences']]))}{sev_txt}")
     if args.json_out:
         with open(args.json_out, 'w') as f:
             json.dump(results, f, indent=2)

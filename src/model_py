@@ -1,4 +1,4 @@
-"""Conv1DClassifier with optional severity regression head"""
+"""Conv1DClassifier implementation"""
 from typing import Optional
 
 import torch
@@ -6,17 +6,8 @@ import torch.nn as nn
 
 
 class Conv1DClassifier(nn.Module):
-    def __init__(
-        self,
-        in_channels: int = 3,
-        num_classes: int = 4,
-        dropout: float = 0.5,
-        base_channels: int = 64,
-        severity_head: bool = False
-    ):
+    def __init__(self, in_channels: int = 3, num_classes: int = 4, dropout: float = 0.5, base_channels: int = 64, severity_head: bool = False, severity_classes: int = 6):
         super().__init__()
-
-        # Feature extractor
         self.feature = nn.Sequential(
             nn.Conv1d(in_channels, base_channels, kernel_size=7, stride=1, padding=3),
             nn.BatchNorm1d(base_channels),
@@ -34,8 +25,6 @@ class Conv1DClassifier(nn.Module):
         )
 
         self.global_pool = nn.AdaptiveAvgPool1d(1)
-
-        # Main classifier
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(base_channels * 4, 128),
@@ -44,15 +33,13 @@ class Conv1DClassifier(nn.Module):
             nn.Linear(128, num_classes),
         )
 
-        # Regression head
         self.severity_head = severity_head
         if severity_head:
             self.severity = nn.Sequential(
                 nn.Flatten(),
                 nn.Linear(base_channels * 4, 64),
                 nn.ReLU(inplace=True),
-                nn.Linear(64, 1),        # <--- 1 regression output
-                nn.Sigmoid(),            # <--- keep in [0, 1]
+                nn.Linear(64, severity_classes),
             )
 
     def forward(self, x: torch.Tensor):
@@ -60,7 +47,7 @@ class Conv1DClassifier(nn.Module):
         pooled = self.global_pool(feat)
         cls = self.classifier(pooled)
         if self.severity_head:
-            sev = self.severity(pooled).squeeze(1)   # shape: (B,)
+            sev = self.severity(pooled)
             return cls, sev
         return cls
 
@@ -74,4 +61,5 @@ def create_model(cfg: Optional[dict] = None) -> Conv1DClassifier:
         dropout=cfg.get("dropout", 0.5),
         base_channels=cfg.get("base_channels", 64),
         severity_head=cfg.get("severity_head", False),
+        severity_classes=cfg.get("severity_classes", 7),
     )

@@ -20,20 +20,32 @@ def evaluate_checkpoint(checkpoint_path: str, data_path: str, classes: List[str]
     device = torch.device(device)
     ckpt = torch.load(checkpoint_path, map_location=device)
     cfg = ckpt.get('cfg', {})
-    model = create_model({'in_channels': 3, 'num_classes': len(classes)})
+    model = create_model({'in_channels': 3, 'num_classes': len(classes), 'severity_head': cfg.get('severity_head', False), 'severity_classes': cfg.get('severity_classes', 7)})
     model.load_state_dict(ckpt['model_state'])
     model.to(device)
     model.eval()
 
-    ds = MotorCurrentDataset(data_path, window_length=cfg.get('window_length', 3000), hop_length=cfg.get('hop_length', 1500), label_map={c: i for i, c in enumerate(classes)})
+    ds = MotorCurrentDataset(data_path, window_length=cfg.get('window_length', 3000), hop_length=cfg.get('hop_length', 1500), label_map={c: i for i, c in enumerate(classes)}, return_severity=cfg.get('severity_head', False))
     loader = torch.utils.data.DataLoader(ds, batch_size=cfg.get('batch_size', 32), collate_fn=collate_fn)
 
     y_true = []
     y_pred = []
+    severity_hist = None
     with torch.no_grad():
-        for x, y in loader:
+        sev_preds = []
+        for batch in loader:
+            if cfg.get('severity_head', False):
+                x, y, sev = batch
+            else:
+                x, y = batch
             x = x.to(device)
-            logits = model(x)
+            outputs = model(x)
+            if cfg.get('severity_head', False):
+                logits, sev_logits = outputs
+                sev_idx = sev_logits.argmax(dim=1).cpu().numpy().tolist()
+                sev_preds.extend([s + 1 for s in sev_idx])  # map to 1..6
+            else:
+                logits = outputs
             preds = logits.argmax(dim=1).cpu().numpy()
             y_pred.extend(preds.tolist())
             y_true.extend(y.numpy().tolist())
@@ -52,5 +64,15 @@ def evaluate_checkpoint(checkpoint_path: str, data_path: str, classes: List[str]
     plt.savefig(os.path.join(save_dir, 'confusion_matrix.png'))
     plt.close()
 
-    metrics = {'accuracy': float(acc), 'precision_per_class': prec.tolist(), 'recall_per_class': rec.tolist(), 'f1_per_class': f1.tolist(), 'classes': classes}
+    metrics = {'accuracy': float(acc), 'precision_per_class': prec.tolist(), 'recall_per_class': rec.tolist(), 'f1_per_class': f1.tolist(), 'classes': classes, 'severity_head': bool(cfg.get('severity_head', False))}
+    if cfg.get('severity_head', False):
+        # Save a simple severity histogram plot
+        plt.figure(figsize=(6,4))
+        sns.histplot(sev_preds, bins=np.arange(1,8)-0.5, kde=False)
+        plt.xticks([1,2,3,4,5,6])
+        plt.xlabel('Predicted Severity (1-6)')
+        plt.ylabel('Count')
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, 'severity_hist.png'))
+        plt.close()
     return metrics

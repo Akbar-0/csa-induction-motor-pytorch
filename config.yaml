@@ -1,28 +1,77 @@
 defaults:
   window_length: 3000
   hop_length: 1500
+
   batch_size: 32
-  epochs: 30
-  lr: 1e-3
+  epochs: 80               # Increased
+  lr: 3e-4
   seed: 42
   num_workers: 4
+
   classes: [Healthy, Bearing, BrokenRotorBar, StatorShort]
+
   use_gpu: true
-  save_dir: runs/exp1
+  save_dir: runs/exp_accuracy
+
   scheduler: plateau
-  plateau_patience: 5
-  early_stop_patience: 10
-  mixed_precision: false
-  oversample: false
-  prefer_voltage: false
-  include_aux: false
+  plateau_patience: 4
+
+  early_stop_patience: 9999   # <- disables early stopping
+
+  mixed_precision: true
+  oversample: true
+  include_aux: true
+
+  severity_head: false
+  severity_classes: 0
+  severity_loss_weight: 0
+
   scaling_type: zscore
-  dropout: 0.5
-  base_channels: 64
+  dropout: 0.3
+  base_channels: 48
+
+  grad_clip: 5.0
+
+  split_ratios: [0.6, 0.4, 0.0]   # <- 60/40/0
+
+  csv_dir: data/simulink/  # <- directory with processed CSV files
+
   augment:
     enabled: true
     noise: true
-    noise_snr_db: 30
+    noise_snr_db: 20
     scale: true
     time_shift: true
-    freq_aug: false
+    freq_aug: true
+
+# defaults:
+#   window_length: 3000
+#   hop_length: 1500
+#   batch_size: 32
+#   epochs: 30
+#   lr: 1e-3
+#   seed: 42
+#   num_workers: 4
+#   classes: [Healthy, Bearing, BrokenRotorBar, StatorShort]
+#   use_gpu: true
+#   save_dir: runs/exp1
+#   scheduler: plateau
+#   plateau_patience: 5
+#   early_stop_patience: 10
+#   mixed_precision: false
+#   oversample: false
+#   prefer_voltage: false
+#   include_aux: false
+#   severity_head: false
+#   severity_classes: 6
+#   severity_loss_weight: 0.3
+#   scaling_type: zscore
+#   dropout: 0.5
+#   base_channels: 64
+#   augment:
+#     enabled: true
+#     noise: true
+#     noise_snr_db: 30
+#     scale: true
+#     time_shift: true
+#     freq_aug: false
