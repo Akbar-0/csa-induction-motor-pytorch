@@ -64,7 +64,7 @@ python "path/to/PyTorch 1DCNN MCSA/evaluate.py" --checkpoint "path/to/PyTorch 1D
 
 ## Prediction
 ```powershell
-python d:\VS code\PyTorch 1DCNN MCSA\predict.py --checkpoint "d:\VS code\PyTorch 1DCNN MCSA\runs\exp1\best.pth" --data-csv "d:\VS code\PyTorch 1DCNN MCSA\data\simulink" --topk 3
+python "path/to/PyTorch 1DCNN MCSA/predict.py" --checkpoint "path/to/PyTorch 1DCNN MCSA/runs/exp/best.pth" --data-csv "path/to/PyTorch 1DCNN MCSA/data/simulink" --topk 3
 ```
 - Prints top-k class labels and confidences per window.
 - Prints `severity_pred` only when the top predicted class is not `Healthy`.
