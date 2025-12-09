@@ -1,4 +1,4 @@
-# CSA Induction Motor Fault Diagnosis - Project Report
+# CSA of Induction Motor for Fault Diagnosis - Project Report
 
 **Date**: December 9, 2025  
 **Model**: 1D Convolutional Neural Network (1D-CNN)  
@@ -130,7 +130,7 @@ Input: 5-channel motor current signals (3 phase currents + 2 auxiliary features)
 
 ### Loss Curves
 
-![Training and Validation Loss](runs/exp_accuracy/loss_curves.png)
+![Training and Validation Loss](images/exp_accuracy/loss_curves.png)
 
 **Analysis**:
 - Training loss: Stable convergence from 1.35 → 0.51
@@ -140,7 +140,7 @@ Input: 5-channel motor current signals (3 phase currents + 2 auxiliary features)
 
 ### Accuracy Curves
 
-![Training and Validation Accuracy](runs/exp_accuracy/acc_curves.png)
+![Training and Validation Accuracy](images/exp_accuracy/acc_curves.png)
 
 **Analysis**:
 - Validation accuracy reaches 100% at epoch 10
@@ -154,7 +154,7 @@ Input: 5-channel motor current signals (3 phase currents + 2 auxiliary features)
 
 ### Training Confusion Matrix
 
-![Training Confusion Matrix](runs/exp_accuracy/confusion_train.png)
+![Training Confusion Matrix](images/exp_accuracy/confusion_train.png)
 
 **Analysis**:
 - Diagonal dominance: ✓
@@ -166,7 +166,7 @@ Input: 5-channel motor current signals (3 phase currents + 2 auxiliary features)
 
 ### Validation Confusion Matrix
 
-![Validation Confusion Matrix](runs/exp_accuracy/confusion_val.png)
+![Validation Confusion Matrix](images/exp_accuracy/confusion_val.png)
 
 **Analysis**:
 - **Perfect confusion matrix**: Completely diagonal
@@ -176,7 +176,7 @@ Input: 5-channel motor current signals (3 phase currents + 2 auxiliary features)
 
 ### Test Confusion Matrix
 
-![Test Confusion Matrix](runs/exp_accuracy/confusion_test.png)
+![Test Confusion Matrix](images/exp_accuracy/confusion_test.png)
 
 **Analysis**:
 - **Perfect confusion matrix**: Completely diagonal
