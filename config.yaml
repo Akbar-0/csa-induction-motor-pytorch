@@ -32,7 +32,9 @@ defaults:
 
   grad_clip: 5.0
 
-  split_ratios: [0.6, 0.4, 0.0]   # <- 60/40/0
+  # split_ratios: [0.6, 0.4, 0.0]   # <- 60/40/0
+  # split_ratios: [0.7, 0.15, 0.15]   # <- 70/15/15
+  split_ratios: [0.6, 0.25, 0.15]   # <- 60/20/20 (train/val/test)
 
   csv_dir: data/simulink/  # <- directory with processed CSV files
 

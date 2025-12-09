@@ -18,14 +18,39 @@ def evaluate_checkpoint(checkpoint_path: str, data_path: str, classes: List[str]
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     device = torch.device(device)
+
     ckpt = torch.load(checkpoint_path, map_location=device)
     cfg = ckpt.get('cfg', {})
-    model = create_model({'in_channels': 3, 'num_classes': len(classes), 'severity_head': cfg.get('severity_head', False), 'severity_classes': cfg.get('severity_classes', 7)})
+
+    # Dataset with the same settings used in training (channels, aux, windowing)
+    label_map = {c: i for i, c in enumerate(classes)}
+    ds = MotorCurrentDataset(
+        data_path,
+        window_length=cfg.get('window_length', 3000),
+        hop_length=cfg.get('hop_length', 1500),
+        label_map=label_map,
+        prefer_voltage=cfg.get('prefer_voltage', False),
+        include_aux=cfg.get('include_aux', False),
+        scaling_type=cfg.get('scaling_type', 'zscore'),
+        return_severity=cfg.get('severity_head', False),
+    )
+
+    # Infer input channels from a sample to match training
+    sample_x, *_ = ds[0]
+    in_channels = int(sample_x.shape[0])
+
+    model = create_model({
+        'in_channels': in_channels,
+        'num_classes': len(classes),
+        'dropout': cfg.get('dropout', 0.5),
+        'base_channels': cfg.get('base_channels', 64),
+        'severity_head': cfg.get('severity_head', False),
+        'severity_classes': cfg.get('severity_classes', 7)
+    })
     model.load_state_dict(ckpt['model_state'])
     model.to(device)
     model.eval()
 
-    ds = MotorCurrentDataset(data_path, window_length=cfg.get('window_length', 3000), hop_length=cfg.get('hop_length', 1500), label_map={c: i for i, c in enumerate(classes)}, return_severity=cfg.get('severity_head', False))
     loader = torch.utils.data.DataLoader(ds, batch_size=cfg.get('batch_size', 32), collate_fn=collate_fn)
 
     y_true = []

@@ -24,11 +24,31 @@ def main():
     ckpt = torch.load(args.checkpoint, map_location='cpu')
     cfg = ckpt.get('cfg', {})
     classes = cfg.get('classes', ["Healthy", "Bearing", "BrokenRotorBar", "StatorShort"])
-    model = create_model({'in_channels': 3, 'num_classes': len(classes), 'severity_head': cfg.get('severity_head', False), 'severity_classes': cfg.get('severity_classes', 7)})
+    
+    # Calculate input channels based on auxiliary features
+    include_aux = cfg.get('include_aux', False)
+    in_channels = 5 if include_aux else 3
+    
+    model = create_model({
+        'in_channels': in_channels, 
+        'num_classes': len(classes), 
+        'severity_head': cfg.get('severity_head', False), 
+        'severity_classes': cfg.get('severity_classes', 7),
+        'base_channels': cfg.get('base_channels', 64),
+        'dropout': cfg.get('dropout', 0.5)
+    })
     model.load_state_dict(ckpt['model_state'])
     model.eval()
 
-    ds = MotorCurrentDataset(args.data_csv, window_length=cfg.get('window_length', 3000), hop_length=cfg.get('hop_length', 1500), label_map={c: i for i, c in enumerate(classes)})
+    ds = MotorCurrentDataset(
+        args.data_csv, 
+        window_length=cfg.get('window_length', 3000), 
+        hop_length=cfg.get('hop_length', 1500), 
+        label_map={c: i for i, c in enumerate(classes)},
+        include_aux=include_aux,
+        prefer_voltage=cfg.get('prefer_voltage', False),
+        scaling_type=cfg.get('scaling_type', 'zscore')
+    )
     loader = torch.utils.data.DataLoader(ds, batch_size=1, collate_fn=collate_fn)
     results = []
     with torch.no_grad():

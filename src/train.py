@@ -8,7 +8,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
@@ -68,6 +70,7 @@ class Trainer:
         classes = cfg.get('classes', ["Healthy", "Bearing", "BrokenRotorBar", "StatorShort"])
         label_map = {c: i for i, c in enumerate(classes)}
         self.label_map = label_map
+        self.classes = classes
 
         augment_fn = None
         if cfg.get("augment", {}).get("enabled", False):
@@ -339,12 +342,27 @@ class Trainer:
                 print(f"Early stopping at epoch {epoch} (best {self.best_metric:.4f} at {self.best_epoch})")
                 break
 
-        test_metrics = self.evaluate_loader(self.loader_test)
+        eval_batch = self.cfg.get('eval_batch_size', self.cfg.get('batch_size', 32))
+        train_eval_loader = DataLoader(self.ds_train, batch_size=eval_batch, shuffle=False, num_workers=self.cfg.get('num_workers', 0), collate_fn=collate_fn)
+        train_metrics = self.evaluate_loader(train_eval_loader, return_confusion=True, split_name='train')
+        val_metrics = self.evaluate_loader(self.loader_val, return_confusion=True, split_name='val')
+        test_metrics = self.evaluate_loader(self.loader_test, return_confusion=True, split_name='test')
+
         summary = {
             'best_val_acc': self.best_metric,
             'best_epoch': self.best_epoch,
             'test_acc': test_metrics['accuracy'],
             'history': history,
+            'confusion_matrices': {
+                'train': train_metrics.get('confusion_matrix'),
+                'val': val_metrics.get('confusion_matrix'),
+                'test': test_metrics.get('confusion_matrix'),
+            },
+            'confusion_paths': {
+                'train': train_metrics.get('confusion_path'),
+                'val': val_metrics.get('confusion_path'),
+                'test': test_metrics.get('confusion_path'),
+            },
         }
         save_json(os.path.join(self.save_dir, 'summary.json'), summary)
         self._plot_curves(history)
@@ -360,7 +378,7 @@ class Trainer:
         plt.plot(history['val_acc'], label='val_acc')
         plt.legend(); plt.tight_layout(); plt.savefig(os.path.join(self.save_dir,'acc_curves.png')); plt.close()
 
-    def evaluate_loader(self, loader: DataLoader) -> Dict:
+    def evaluate_loader(self, loader: DataLoader, return_confusion: bool = False, split_name: str | None = None) -> Dict:
         self.model.eval()
         ys_true = []
         ys_pred = []
@@ -455,10 +473,31 @@ class Trainer:
 
         acc = accuracy_score(ys_true, ys_pred)
         prec, rec, f1, _ = precision_recall_fscore_support(ys_true, ys_pred, labels=list(range(len(self.label_map))), zero_division=0)
-        return {
+
+        result = {
             'accuracy': acc,
             'loss': float(np.mean(losses)),
             'precision': prec.tolist(),
             'recall': rec.tolist(),
             'f1': f1.tolist(),
         }
+
+        if return_confusion:
+            cm = confusion_matrix(ys_true, ys_pred, labels=list(range(len(self.label_map))))
+            result['confusion_matrix'] = cm.tolist()
+            if split_name:
+                result['confusion_path'] = self._save_confusion_plot(cm, split_name)
+
+        return result
+
+    def _save_confusion_plot(self, cm: np.ndarray, split_name: str) -> str:
+        plt.figure(figsize=(6, 5))
+        sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes, cmap='Blues')
+        plt.xlabel('Predicted')
+        plt.ylabel('True')
+        plt.title(f'Confusion Matrix - {split_name}')
+        plt.tight_layout()
+        out_path = os.path.join(self.save_dir, f'confusion_{split_name}.png')
+        plt.savefig(out_path)
+        plt.close()
+        return out_path

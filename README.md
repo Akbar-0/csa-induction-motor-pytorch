@@ -6,7 +6,7 @@ This project trains a 1D CNN on three-phase currents to classify motor condition
 - Place your CSVs under `data/simulink`.
 - Each CSV contains columns: `Time,Torque,RPM,Ia,Ib,Ic` (order flexible; headers used).
 - Filename conventions (case-insensitive):
-	- `healthy.csv` → class `Healthy`
+	- `healthy_1..6.csv` → class `Healthy`, load `1..6`
 	- `BearingFault_1..6.csv` → class `Bearing`, severity `1..6`
 	- `PhaseImbalance_1..6.csv` or `StatorShort_1..6.csv` → class `StatorShort`, severity `1..6`
 	- `RotorFault_1..6.csv` or `BrokenRotorBar_1..6.csv` → class `BrokenRotorBar`, severity `1..6`

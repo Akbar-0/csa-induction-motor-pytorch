@@ -7,8 +7,9 @@ from src.eval import evaluate_checkpoint
 
 def parse_args():
     p = argparse.ArgumentParser()
+    p.add_argument('--config', type=str, default='config.yaml')
     p.add_argument('--checkpoint', required=True)
-    p.add_argument('--data-csv', required=True)
+    p.add_argument('--data-csv', type=str, default=None, help='CSV directory or single file')
     p.add_argument('--save-dir', default='runs/eval')
     p.add_argument('--metrics-json', default='metrics.json')
     return p.parse_args()

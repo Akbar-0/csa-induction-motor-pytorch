@@ -7,7 +7,7 @@ from src.train import Trainer
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('--config', type=str, default='config.yaml')
-    p.add_argument('--data-csv', type=str, required=True, help='CSV directory or single file')
+    p.add_argument('--data-csv', type=str, default=None, help='CSV directory or single file')
     p.add_argument('--epochs', type=int, default=None)
     p.add_argument('--batch-size', type=int, default=None)
     p.add_argument('--lr', type=float, default=None)
@@ -33,6 +33,12 @@ def main():
     args = parse_args()
     with open(args.config, 'r') as f:
         cfg = yaml.safe_load(f).get('defaults', {})
+    
+    # Use --data-csv if provided, otherwise use csv_dir from config
+    data_csv = args.data_csv or cfg.get('csv_dir')
+    if not data_csv:
+        raise ValueError("data-csv must be provided via --data-csv argument or 'csv_dir' in config file")
+    
     if args.epochs:
         cfg['epochs'] = args.epochs
     if args.batch_size:
@@ -70,7 +76,7 @@ def main():
     if args.severity_loss_weight is not None:
         cfg['severity_loss_weight'] = args.severity_loss_weight
 
-    trainer = Trainer(cfg, args.data_csv)
+    trainer = Trainer(cfg, data_csv)
     trainer.fit()
 
 
