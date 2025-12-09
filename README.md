@@ -58,7 +58,7 @@ python "path/to/PyTorch 1DCNN MCSA/train.py" --data-csv "path/to/PyTorch 1DCNN M
 
 ## Evaluation
 ```powershell
-python "path/to/PyTorch 1DCNN MCSA/evaluate.py" --checkpoint "path/to/PyTorch 1DCNN MCSA/runs/exp/best.pth" --data-csv "d:\VS code\PyTorch 1DCNN MCSA\data\simulink" --save-dir "d:\VS code\PyTorch 1DCNN MCSA\runs\sim_eval"
+python "path/to/PyTorch 1DCNN MCSA/evaluate.py" --checkpoint "path/to/PyTorch 1DCNN MCSA/runs/exp/best.pth" --data-csv "path/to/PyTorch 1DCNN MCSA/data/simulink" --save-dir "path/to/PyTorch 1DCNN MCSA/runs/sim_eval"
 ```
 - Saves `confusion_matrix.png`. If severity head is enabled, also saves `severity_hist.png`.
 
