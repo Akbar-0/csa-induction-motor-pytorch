@@ -2,6 +2,37 @@
 
 This project trains a 1D CNN on three-phase currents to classify motor condition and optionally predict fault severity.
 
+## Environment Setup
+1. Clone the repository:
+	```bash
+	git clone <repository-url>
+	cd csa-induction-motor-pytorch
+	```
+
+2. Create a Python virtual environment:
+	```bash
+	python -m venv venv
+	source venv/bin/activate  # On Windows: venv\Scripts\activate
+	```
+
+3. Install dependencies:
+	```bash
+	pip install --upgrade pip
+	pip install -r requirements.txt
+	```
+
+4. Verify PyTorch installation:
+	```bash
+	python -c "import torch; print(torch.__version__)"
+	```
+
+5. Prepare data directory:
+	```bash
+	mkdir -p data/simulink
+	```
+
+6. Place your Simulink CSV files in `data/simulink/` following the naming conventions above.
+
 ## Simulink CSV Data
 - Place your CSVs under `data/simulink`.
 - Each CSV contains columns: `Time,Torque,RPM,Ia,Ib,Ic` (order flexible; headers used).
@@ -14,7 +45,11 @@ This project trains a 1D CNN on three-phase currents to classify motor condition
 
 ## Training
 ```powershell
-python d:\VS code\PyTorch 1DCNN MCSA\train.py --data-csv "d:\VS code\PyTorch 1DCNN MCSA\data\simulink" --epochs 20 --batch-size 32 --severity-head --severity-loss-weight 0.3 --include-aux
+python train.py --config config.yaml
+```
+___OR if you want customized training:___
+```powershell
+python "path/to/PyTorch 1DCNN MCSA/train.py" --data-csv "path/to/PyTorch 1DCNN MCSA/data/simulink" --save-dir "path/to/PyTorch 1DCNN MCSA/runs/exp" --epochs 80 --batch-size 32 --severity-head --severity-loss-weight 0.3 --include-aux
 ```
 - `--severity-head`: enables multi-task prediction with a 6-class severity head.
 - `--severity-loss-weight`: scales the severity loss term (default `0.3`).
@@ -23,7 +58,7 @@ python d:\VS code\PyTorch 1DCNN MCSA\train.py --data-csv "d:\VS code\PyTorch 1DC
 
 ## Evaluation
 ```powershell
-python d:\VS code\PyTorch 1DCNN MCSA\evaluate.py --checkpoint "d:\VS code\PyTorch 1DCNN MCSA\runs\exp1\best.pth" --data-csv "d:\VS code\PyTorch 1DCNN MCSA\data\simulink" --save-dir "d:\VS code\PyTorch 1DCNN MCSA\runs\sim_eval"
+python "path/to/PyTorch 1DCNN MCSA/evaluate.py" --checkpoint "path/to/PyTorch 1DCNN MCSA/runs/exp/best.pth" --data-csv "d:\VS code\PyTorch 1DCNN MCSA\data\simulink" --save-dir "d:\VS code\PyTorch 1DCNN MCSA\runs\sim_eval"
 ```
 - Saves `confusion_matrix.png`. If severity head is enabled, also saves `severity_hist.png`.
 

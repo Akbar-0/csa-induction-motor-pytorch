@@ -1,5 +1,7 @@
 # Python
 __pycache__/
+*.cpython-311.pyc
+*.cpython-312.pyc
 *.pyc
 *.pyo
 *.pyd
@@ -29,3 +31,6 @@ runs/
 
 # Mac/Linux hidden files
 .DS_Store
+
+# Prompts
+prompts.md
